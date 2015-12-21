@@ -203,16 +203,6 @@ static int setup_socket(int portno)
 	return psock;
 }
 
-static void wait_for_event(int sockfd)
-{
-	fd_set rfds;
-
-	FD_ZERO(&rfds);
-	FD_SET(sockfd, &rfds);
-
-	select(sockfd + 1, &rfds, NULL, NULL, NULL);
-}
-
 int main(void)
 {
 	pthread_t irq_poll_thread;
@@ -237,8 +227,6 @@ int main(void)
 		for (;;) {
 			char buf[REMOTE_IO_PKT_SIZE];
 			int magic;
-
-			wait_for_event(csock);
 
 			magic = read(csock, buf, sizeof(buf));
 
