@@ -24,8 +24,8 @@
 struct __pak remote_io_read_req {
 	uint8_t magic;
 	uint32_t address;
+	uint8_t size;
 	uint32_t __pad32;
-	uint8_t __pad8;
 };
 
 #define REMOTE_IO_READ_RESP	0x1
@@ -43,7 +43,7 @@ struct __pak remote_io_write_req {
 	uint8_t magic;
 	uint32_t address;
 	uint32_t value;
-	uint8_t __pad8;
+	uint8_t size;
 };
 
 #define REMOTE_IO_IRQ_WATCH	0x3

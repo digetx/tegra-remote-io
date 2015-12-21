@@ -67,33 +67,54 @@ static void map_mem(off_t phys_address, off_t size)
 	mem_virt += PageOffset >> 2;
 }
 
-static uint32_t mem_read(uint32_t offset)
+static uint32_t mem_read(uint32_t offset, int size)
 {
-	return *(volatile uint32_t*)(mem_virt + offset);
+	switch (size) {
+	case 8:
+		return *(volatile uint8_t*)(mem_virt + offset);
+	case 16:
+		return *(volatile uint16_t*)(mem_virt + offset);
+	case 32:
+		return *(volatile uint32_t*)(mem_virt + offset);
+	default:
+		abort();
+	}
 }
 
-static void mem_write(uint32_t value, uint32_t offset)
+static void mem_write(uint32_t value, uint32_t offset, int size)
 {
-	*(volatile uint32_t*)(mem_virt + offset) = value;
+	switch (size) {
+	case 8:
+		*(volatile uint8_t*)(mem_virt + offset) = value;
+		break;
+	case 16:
+		*(volatile uint16_t*)(mem_virt + offset) = value;
+		break;
+	case 32:
+		*(volatile uint32_t*)(mem_virt + offset) = value;
+		break;
+	default:
+		abort();
+	}
 }
 
-static uint32_t cpu_read(uint32_t offset)
+static uint32_t cpu_read(uint32_t offset, int size)
 {
 	uint32_t ret;
 
-	printf("CPU read:  [0x%08X] = ", offset);
+	printf("CPU read%d:  [0x%08X] = ", size, offset);
 
-	ret = mem_read(offset);
+	ret = mem_read(offset, size);
 
 	printf("0x%08X\n", ret);
 
 	return ret;
 }
 
-static void cpu_write(uint32_t value, uint32_t offset)
+static void cpu_write(uint32_t value, uint32_t offset, int size)
 {
-	printf("CPU write: [0x%08X] = 0x%08X\n", offset, value);
-	mem_write(value, offset);
+	printf("CPU write%d: [0x%08X] = 0x%08X\n", size, offset, value);
+	mem_write(value, offset, size);
 }
 
 static void irq_sts_upd_poll(void)
@@ -116,7 +137,7 @@ static void irq_sts_upd_poll(void)
 			continue;
 		}
 
-		new_sts = mem_read(PRI_ICTLR_IRQ_LATCHED + bank * 0x100);
+		new_sts = mem_read(PRI_ICTLR_IRQ_LATCHED + bank * 0x100, 32);
 		new_sts = new_sts & irqs_to_watch[bank];
 		upd_sts = irqs_status[bank] ^ new_sts;
 
@@ -233,7 +254,7 @@ int main(void)
 				struct remote_io_read_req *req = (void *) buf;
 				struct remote_io_read_resp resp = {
 					.magic = REMOTE_IO_READ_RESP,
-					.data = cpu_read(req->address),
+					.data = cpu_read(req->address, req->size),
 				};
 
 				write(csock, &resp, sizeof(resp));
@@ -249,7 +270,7 @@ int main(void)
 			{
 				struct remote_io_write_req *req = (void *) buf;
 
-				cpu_write(req->value, req->address);
+				cpu_write(req->value, req->address, req->size);
 
 				irq_sts_upd_poll();
 				break;
