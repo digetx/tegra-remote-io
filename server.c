@@ -445,7 +445,11 @@ int main(void)
 							     req->size);
 				}
 
+				pthread_mutex_lock(&irq_upd_mutex);
+
 				send_all(csock, &resp, sizeof(resp));
+
+				pthread_mutex_unlock(&irq_upd_mutex);
 
 				if (errno != 0) {
 					break;
