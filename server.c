@@ -65,6 +65,8 @@ static uint32_t irqs_status[4];
 
 static void *mem_virt;
 
+static int silent;
+
 static void map_mem(off_t phys_address, off_t size)
 {
 	off_t PageOffset, PageAddress;
@@ -121,18 +123,24 @@ static uint32_t cpu_read(uint32_t offset, int size)
 {
 	uint32_t ret;
 
-	printf("CPU read%d:  [0x%08X] = ", size, offset);
+	if (!silent) {
+		printf("CPU read%d:  [0x%08X] = ", size, offset);
+	}
 
 	ret = mem_read(offset, size);
 
-	printf("0x%08X\n", ret);
+	if (!silent) {
+		printf("0x%08X\n", ret);
+	}
 
 	return ret;
 }
 
 static void cpu_write(uint32_t value, uint32_t offset, int size)
 {
-	printf("CPU write%d: [0x%08X] = 0x%08X\n", size, offset, value);
+	if (!silent) {
+		printf("CPU write%d: [0x%08X] = 0x%08X\n", size, offset, value);
+	}
 	mem_write(value, offset, size);
 }
 
@@ -163,7 +171,9 @@ static uint32_t avp_read(uint32_t addr, int size)
 	uint32_t cmd;
 	uint32_t ret;
 
-	printf("AVP read%d:  [0x%08X] = ", size, addr);
+	if (!silent) {
+		printf("AVP read%d:  [0x%08X] = ", size, addr);
+	}
 
 	switch (size) {
 	case 8:
@@ -197,7 +207,10 @@ static uint32_t avp_read(uint32_t addr, int size)
 	avp_halt();
 
 	ret = mem_read(AVP_RES, 32);
-	printf("0x%08X\n", ret);
+
+	if (!silent) {
+		printf("0x%08X\n", ret);
+	}
 
 	return ret;
 }
@@ -206,7 +219,9 @@ static void avp_write(uint32_t value, uint32_t addr, int size)
 {
 	uint32_t cmd;
 
-	printf("AVP write%d: [0x%08X] = 0x%08X\n", size, addr, value);
+	if (!silent) {
+		printf("AVP write%d: [0x%08X] = 0x%08X\n", size, addr, value);
+	}
 
 	switch (size) {
 	case 8:
@@ -310,11 +325,13 @@ static void irq_sts_upd_poll(void)
 			continue;
 		}
 
-		FOREACH_BIT_SET(upd_sts, i, 32) {
-			int irq_nb = bank * 32 + i;
+		if (!silent) {
+			FOREACH_BIT_SET(upd_sts, i, 32) {
+				int irq_nb = bank * 32 + i;
 
-			printf("IRQ %d update %d\n",
-				   irq_nb, !!(new_sts & (1 << i)));
+				printf("IRQ %d update %d\n",
+					irq_nb, !!(new_sts & (1 << i)));
+			}
 		}
 
 		irqs_status[bank] = new_sts;
@@ -392,10 +409,21 @@ static void prepare_avp(void)
 	printf("done\n");
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
 	pthread_t irq_poll_thread;
 	int psock;
+	int c;
+
+	while ((c = getopt(argc, argv, "s")) != -1) {
+		switch (c) {
+		case 's':
+			silent = 1;
+			break;
+		default:
+			break;
+		}
+	}
 
 	map_mem(0x0, 0x70000000);
 	psock = setup_socket(45312);
