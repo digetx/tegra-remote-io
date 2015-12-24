@@ -1,2 +1,5 @@
 .*
 remote_io_srv
+avp.bin
+avp.h
+avp.o
