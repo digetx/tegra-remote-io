@@ -22,15 +22,34 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <strings.h>
+#include <string.h>
 #include <unistd.h>
 
 #include <arpa/inet.h>
 #include <sys/mman.h>
 
 #include "api.h"
+#include "avp.h"
 
 #define PRI_ICTLR_IRQ_LATCHED		0x60004010
+
+#define AVP_RESET_VECTOR		0x6000F200
+#define TEGRA_CLK_RESET_BASE		0x60006000
+#define FLOW_CTRL_HALT_COP_EVENTS	0x60007004
+#define FLOW_MODE_STOP			(2 << 29)
+#define FLOW_MODE_NONE			0
+
+#define MEM_END				0x40000000
+#define AVP_UNCACHED_MEM		0x80000000
+
+#define AVP_NOP		0xFF
+#define AVP_IDLE	0
+#define AVP_READ8	1
+#define AVP_READ16	2
+#define AVP_READ32	3
+#define AVP_WRITE8	4
+#define AVP_WRITE16	5
+#define AVP_WRITE32	6
 
 #define FOREACH_BIT_SET(val, itr, size)     \
     if (val != 0)                           \
@@ -115,6 +134,111 @@ static void cpu_write(uint32_t value, uint32_t offset, int size)
 {
 	printf("CPU write%d: [0x%08X] = 0x%08X\n", size, offset, value);
 	mem_write(value, offset, size);
+}
+
+static void avp_run(void)
+{
+	mem_write(FLOW_MODE_NONE, FLOW_CTRL_HALT_COP_EVENTS, 32);
+}
+
+static void avp_halt(void)
+{
+	mem_write(FLOW_MODE_STOP, FLOW_CTRL_HALT_COP_EVENTS, 32);
+}
+
+static void start_avp(void)
+{
+	mem_write(1 << 1, TEGRA_CLK_RESET_BASE + 0x304, 32);
+}
+
+static void stop_avp(void)
+{
+	avp_halt();
+	mem_write(1 << 1, TEGRA_CLK_RESET_BASE + 0x300, 32);
+	usleep(1000);
+}
+
+static uint32_t avp_read(uint32_t addr, int size)
+{
+	uint32_t cmd;
+	uint32_t ret;
+
+	printf("AVP read%d:  [0x%08X] = ", size, addr);
+
+	switch (size) {
+	case 8:
+		cmd = AVP_READ8;
+		break;
+	case 16:
+		cmd = AVP_READ16;
+		break;
+	case 32:
+		cmd = AVP_READ32;
+		break;
+	default:
+		abort();
+	}
+
+	assert(mem_read(AVP_ACT, 32) == AVP_IDLE);
+
+	if (addr < MEM_END) {
+		addr += AVP_UNCACHED_MEM;
+	}
+
+	mem_write(addr, AVP_ARG1, 32);
+	mem_write(cmd, AVP_ACT, 32);
+
+	avp_run();
+
+	do {
+		usleep(1);
+	} while (mem_read(AVP_ACT, 32) != AVP_IDLE);
+
+	avp_halt();
+
+	ret = mem_read(AVP_RES, 32);
+	printf("0x%08X\n", ret);
+
+	return ret;
+}
+
+static void avp_write(uint32_t value, uint32_t addr, int size)
+{
+	uint32_t cmd;
+
+	printf("AVP write%d: [0x%08X] = 0x%08X\n", size, addr, value);
+
+	switch (size) {
+	case 8:
+		cmd = AVP_WRITE8;
+		break;
+	case 16:
+		cmd = AVP_WRITE16;
+		break;
+	case 32:
+		cmd = AVP_WRITE32;
+		break;
+	default:
+		abort();
+	}
+
+	assert(mem_read(AVP_ACT, 32) == AVP_IDLE);
+
+	if (addr < MEM_END) {
+		addr += AVP_UNCACHED_MEM;
+	}
+
+	mem_write(value, AVP_ARG1, 32);
+	mem_write(addr, AVP_ARG2, 32);
+	mem_write(cmd, AVP_ACT, 32);
+
+	avp_run();
+
+	do {
+		usleep(1);
+	} while (mem_read(AVP_ACT, 32) != AVP_IDLE);
+
+	avp_halt();
 }
 
 static int recv_all(int fd, void *_buf, int len1)
@@ -244,6 +368,30 @@ static int setup_socket(int portno)
 	return psock;
 }
 
+static void prepare_avp(void)
+{
+	printf("Preparing AVP... ");
+
+	stop_avp();
+
+	memcpy(mem_virt + AVP_ENTRY_ADDR, avp_bin, avp_bin_len);
+
+	mem_write(AVP_ENTRY_ADDR, AVP_RESET_VECTOR, 32);
+	mem_write(AVP_NOP, AVP_ACT, 32);
+
+	start_avp();
+
+	avp_run();
+
+	do {
+		usleep(500);
+	} while (mem_read(AVP_ACT, 32) != AVP_IDLE);
+
+	avp_halt();
+
+	printf("done\n");
+}
+
 int main(void)
 {
 	pthread_t irq_poll_thread;
@@ -256,14 +404,18 @@ int main(void)
 
 	setbuf(stdout, NULL);
 
+	prepare_avp();
+
 	for (;;) {
-		printf("Waiting for connection...\n");
+		printf("Waiting for connection... ");
 
 		csock = accept(psock, NULL, NULL);
 
 		if (csock == -1) {
 			abort();
 		}
+
+		printf("OK\n");
 
 		for (;;) {
 			char buf[REMOTE_IO_PKT_SIZE];
@@ -283,8 +435,15 @@ int main(void)
 				struct remote_io_read_req *req = (void *) buf;
 				struct remote_io_read_resp resp = {
 					.magic = REMOTE_IO_READ_RESP,
-					.data = cpu_read(req->address, req->size),
 				};
+
+				if (req->on_avp) {
+					resp.data = avp_read(req->address,
+							     req->size);
+				} else {
+					resp.data = cpu_read(req->address,
+							     req->size);
+				}
 
 				send_all(csock, &resp, sizeof(resp));
 
@@ -299,7 +458,13 @@ int main(void)
 			{
 				struct remote_io_write_req *req = (void *) buf;
 
-				cpu_write(req->value, req->address, req->size);
+				if (req->on_avp) {
+					avp_write(req->value, req->address,
+						  req->size);
+				} else {
+					cpu_write(req->value, req->address,
+						  req->size);
+				}
 
 				irq_sts_upd_poll();
 				break;
