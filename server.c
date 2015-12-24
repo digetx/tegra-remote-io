@@ -117,6 +117,47 @@ static void cpu_write(uint32_t value, uint32_t offset, int size)
 	mem_write(value, offset, size);
 }
 
+static int recv_all(int fd, void *_buf, int len1)
+{
+	int ret, len;
+	uint8_t *buf = _buf;
+
+	len = len1;
+	while ((len > 0) && (ret = read(fd, buf, len)) != 0) {
+		if (ret < 0) {
+			if (errno != EINTR && errno != EAGAIN) {
+				return -1;
+			}
+			continue;
+		} else {
+			buf += ret;
+			len -= ret;
+		}
+	}
+	return len1 - len;
+}
+
+static int send_all(int fd, const void *_buf, int len1)
+{
+	int ret, len;
+	const uint8_t *buf = _buf;
+
+	len = len1;
+	while (len > 0) {
+		ret = write(fd, buf, len);
+		if (ret < 0) {
+			if (errno != EINTR && errno != EAGAIN)
+				return -1;
+		} else if (ret == 0) {
+			break;
+		} else {
+			buf += ret;
+			len -= ret;
+		}
+	}
+	return len1 - len;
+}
+
 static void irq_sts_upd_poll(void)
 {
 	uint32_t new_sts;
@@ -149,7 +190,7 @@ static void irq_sts_upd_poll(void)
 			int irq_nb = bank * 32 + i;
 
 			printf("IRQ %d update %d\n",
-			       irq_nb, !!(new_sts & (1 << i)));
+				   irq_nb, !!(new_sts & (1 << i)));
 		}
 
 		irqs_status[bank] = new_sts;
@@ -158,7 +199,7 @@ static void irq_sts_upd_poll(void)
 		notify.sts  = new_sts;
 		notify.upd  = upd_sts;
 
-		write(csock, &notify, sizeof(notify));
+		send_all(csock, &notify, sizeof(notify));
 	}
 
 	pthread_mutex_unlock(&irq_upd_mutex);
@@ -228,7 +269,7 @@ int main(void)
 			char buf[REMOTE_IO_PKT_SIZE];
 			int magic;
 
-			magic = read(csock, buf, sizeof(buf));
+			magic = recv_all(csock, buf, sizeof(buf));
 
 			if (errno != 0 || magic != sizeof(buf)) {
 				break;
@@ -245,7 +286,7 @@ int main(void)
 					.data = cpu_read(req->address, req->size),
 				};
 
-				write(csock, &resp, sizeof(resp));
+				send_all(csock, &resp, sizeof(resp));
 
 				if (errno != 0) {
 					break;
