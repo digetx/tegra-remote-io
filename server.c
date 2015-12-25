@@ -64,6 +64,8 @@ static uint32_t irqs_to_watch[4];
 static uint32_t irqs_status[4];
 
 static void *mem_virt;
+static uint32_t io_addr_start;
+static uint32_t io_addr_end;
 
 static int silent;
 
@@ -86,6 +88,9 @@ static void map_mem(off_t phys_address, off_t size)
 	assert(mem_virt != MAP_FAILED);
 
 	mem_virt += PageOffset >> 2;
+
+	io_addr_start = phys_address;
+	io_addr_end   = phys_address + size;
 }
 
 static uint32_t mem_read(uint32_t offset, int size)
@@ -465,6 +470,9 @@ int main(int argc, char **argv)
 					.magic = REMOTE_IO_READ_RESP,
 				};
 
+				assert(req->address >= io_addr_start);
+				assert(req->address + req->size <= io_addr_end);
+
 				if (req->on_avp) {
 					resp.data = avp_read(req->address,
 							     req->size);
@@ -490,6 +498,9 @@ int main(int argc, char **argv)
 			{
 				struct remote_io_write_req *req = (void *) buf;
 
+				assert(req->address >= io_addr_start);
+				assert(req->address + req->size <= io_addr_end);
+
 				if (req->on_avp) {
 					avp_write(req->value, req->address,
 						  req->size);
@@ -506,13 +517,11 @@ int main(int argc, char **argv)
 				struct remote_io_irq_watch_req *req = (void *) buf;
 				unsigned bank = req->irq_nb >> 5;
 
-				if (bank > 3) {
-					abort();
-				}
+				printf("Enabled watch for IRQ %d\n", req->irq_nb);
+
+				assert(bank < 4);
 
 				irqs_to_watch[bank] |= 1 << (req->irq_nb & 0x1F);
-
-				printf("Enabled watch for IRQ %d\n", req->irq_nb);
 
 				break;
 			}
