@@ -65,3 +65,14 @@ struct __pak remote_io_irq_notify {
 	uint32_t upd;
 	uint32_t sts;
 };
+
+#define REMOTE_IO_READ_MEM_RANGE	0x5
+
+struct __pak remote_io_read_range_req {
+	uint8_t magic;
+	uint32_t address;
+	uint32_t size;
+	uint8_t __pad8;
+};
+
+#define REMOTE_IO_READ_MEM_RANGE_RESP	0x6

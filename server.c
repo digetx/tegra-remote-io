@@ -525,6 +525,33 @@ int main(int argc, char **argv)
 
 				break;
 			}
+			case REMOTE_IO_READ_MEM_RANGE:
+			{
+				struct remote_io_read_range_req *req = (void *) buf;
+				struct remote_io_read_resp resp = {
+					.magic = REMOTE_IO_READ_MEM_RANGE_RESP,
+				};
+
+				if (!silent) {
+					printf("Range read @0x%08X size %u\n",
+					       req->address, req->size);
+				}
+
+				assert(req->address >= io_addr_start);
+				assert(req->address + req->size <= MEM_END);
+
+				pthread_mutex_lock(&irq_upd_mutex);
+
+				send_all(csock, &resp, sizeof(resp));
+
+				if (errno == 0) {
+					send_all(csock, mem_virt + req->address,
+						 req->size);
+				}
+
+				pthread_mutex_unlock(&irq_upd_mutex);
+				break;
+			}
 			default:
 				fprintf(stderr, "Bad magic %X\n", magic);
 				errno = EINVAL;
