@@ -309,9 +309,7 @@ static void irq_sts_upd_poll(void)
 	int bank;
 	int i;
 
-	if (pthread_mutex_trylock(&irq_upd_mutex) != 0) {
-		return;
-	}
+	pthread_mutex_lock(&irq_upd_mutex);
 
 	for (bank = 0; bank < 4; bank++) {
 		struct remote_io_irq_notify notify = {
@@ -490,8 +488,6 @@ int main(int argc, char **argv)
 				if (errno != 0) {
 					break;
 				}
-
-				irq_sts_upd_poll();
 				break;
 			}
 			case REMOTE_IO_WRITE:
@@ -508,8 +504,6 @@ int main(int argc, char **argv)
 					cpu_write(req->value, req->address,
 						  req->size);
 				}
-
-				irq_sts_upd_poll();
 				break;
 			}
 			case REMOTE_IO_IRQ_WATCH:
