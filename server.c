@@ -23,6 +23,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <termios.h>
 #include <unistd.h>
 
 #include <arpa/inet.h>
@@ -412,8 +413,32 @@ static void prepare_avp(void)
 	printf("done\n");
 }
 
+static void * input_handler(void *arg)
+{
+	struct termios t;
+
+	tcgetattr(STDIN_FILENO, &t);
+	t.c_lflag &= ~(ICANON | ECHO);
+	tcsetattr(STDIN_FILENO, TCSANOW, &t);
+
+	for (;;) {
+		switch (getchar()) {
+		case 's':
+			silent = !silent;
+			printf("Switched to %s mode\n",
+			       silent ? "silent" : "verbose");
+			break;
+		}
+
+		usleep(100000);
+	}
+
+	return NULL;
+}
+
 int main(int argc, char **argv)
 {
+	pthread_t input_handler_thread;
 	pthread_t irq_poll_thread;
 	int psock;
 	int c;
@@ -431,6 +456,7 @@ int main(int argc, char **argv)
 	map_mem(0x0, 0x70000000);
 	psock = setup_socket(45312);
 
+	assert(pthread_create(&input_handler_thread, NULL, input_handler, NULL) == 0);
 	assert(pthread_create(&irq_poll_thread, NULL, irq_watcher, NULL) == 0);
 
 	setbuf(stdout, NULL);
