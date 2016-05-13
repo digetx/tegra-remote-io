@@ -536,6 +536,8 @@ int main(int argc, char **argv)
 				} else {
 					cpu_write(req->value, req->address,
 						  req->size);
+
+					cpu_read(req->address, req->size);
 				}
 				break;
 			}
