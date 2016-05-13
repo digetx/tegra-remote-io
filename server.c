@@ -440,6 +440,8 @@ int main(int argc, char **argv)
 {
 	pthread_t input_handler_thread;
 	pthread_t irq_poll_thread;
+	char buf[REMOTE_IO_PKT_SIZE];
+	int magic = 0;
 	int psock;
 	int c;
 
@@ -467,21 +469,26 @@ int main(int argc, char **argv)
 		printf("Waiting for connection... ");
 
 		csock = accept(psock, NULL, NULL);
-
-		if (csock == -1) {
-			abort();
-		}
+		assert(csock >= 0);
 
 		printf("OK\n");
 
-		for (;;) {
-			char buf[REMOTE_IO_PKT_SIZE];
-			int magic;
-
+		while (errno == 0) {
 			magic = recv_all(csock, buf, sizeof(buf));
 
-			if (errno != 0 || magic != sizeof(buf)) {
+			if (errno == 0 && magic < sizeof(buf)) {
+				fprintf(stderr, "Bad buf size %d\n", magic);
 				break;
+			}
+
+			if (errno != 0) {
+				break;
+			}
+
+			if (!silent) {
+				printf("buf 0x%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X\n",
+				       buf[0], buf[1], buf[2], buf[3], buf[4], buf[5],
+				       buf[6], buf[7], buf[8], buf[9]);
 			}
 
 			magic = buf[0];
@@ -574,15 +581,10 @@ int main(int argc, char **argv)
 			}
 			default:
 				fprintf(stderr, "Bad magic %X\n", magic);
-				errno = EINVAL;
-				break;
-			}
-
-			if (errno != 0) {
-				break;
+				goto close_conn;
 			}
 		}
-
+close_conn:
 		pthread_mutex_lock(&irq_upd_mutex);
 
 		bzero(irqs_to_watch, sizeof(irqs_to_watch));
@@ -591,6 +593,7 @@ int main(int argc, char **argv)
 		pthread_mutex_unlock(&irq_upd_mutex);
 
 		perror("Closing connection");
+		shutdown(csock, SHUT_RDWR);
 		close(csock);
 	}
 
